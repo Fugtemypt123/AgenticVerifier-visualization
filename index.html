@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AgenticVerifier Conversation Viewer (Static)</title>
+    <style>
+        :root {
+            --bg: #0f1117;
+            --panel: #151822;
+            --text: #e6e6e6;
+            --muted: #a0a0a0;
+            --accent: #5b8cff;
+            --border: #2a2f3f;
+        }
+        html, body { height: 100%; }
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--text);
+            font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+        }
+        .layout { display: grid; grid-template-columns: 280px 1fr; height: 100%; }
+        .sidebar { background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+        .sidebar h2 { margin: 16px; font-size: 16px; color: var(--muted); font-weight: 600; }
+        .dataset-list { padding: 0 8px 16px; overflow: auto; }
+        .dataset { display: block; padding: 10px 12px; margin: 6px 8px; background: #0f1320; color: var(--text); text-decoration: none; border: 1px solid var(--border); border-radius: 8px; }
+        .dataset.active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(91, 140, 255, 0.25) inset; }
+        .content { display: grid; grid-template-rows: auto 1fr; }
+        .topbar { display: flex; gap: 12px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+        .title { font-size: 18px; font-weight: 600; }
+        .muted { color: var(--muted); }
+        .main { display: grid; grid-template-columns: 380px 1fr; height: 100%; }
+        .panel { border-right: 1px solid var(--border); overflow: auto; }
+        .panel h3 { font-size: 14px; margin: 16px; color: var(--muted); font-weight: 600; }
+        .rounds { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; padding: 0 16px 24px; }
+        .round { background: #0f1320; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; cursor: pointer; }
+        .round img { width: 100%; display: block; aspect-ratio: 1 / 1; object-fit: cover; }
+        .round .label { padding: 8px; font-size: 12px; color: var(--muted); }
+        .detail { overflow: auto; }
+        .section { padding: 16px; border-bottom: 1px solid var(--border); }
+        .section h4 { margin: 0 0 10px; font-size: 14px; color: var(--muted); }
+        .imgwrap { background: #0b0e18; border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
+        .imgwrap img { width: 100%; height: auto; display: block; }
+        pre, code { background: #0b0e18; color: #d7e1ff; border: 1px solid var(--border); border-radius: 8px; padding: 12px; overflow: auto; }
+        .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .note { padding: 10px 12px; background: #0b0e18; border: 1px dashed var(--border); border-radius: 8px; color: var(--muted); }
+        a { color: var(--accent); }
+        .small { font-size: 12px; }
+        @media (max-width: 1200px) { .main { grid-template-columns: 1fr; } .panel { border-right: none; border-bottom: 1px solid var(--border); } }
+    </style>
+    <script>
+        // Configure datasets here. Use paths relative to the repository root as served by GitHub Pages.
+        const DATASETS = [
+            "data/showcase1",
+            "data/showcase2",
+            "data/light_demo",
+            "data/camera1",
+            "data/camera2",
+            // "output/blendergym/place_demo_1/placement1",
+            // "output/blendergym/place_demo_2/placement1",
+        ];
+
+        const MAX_PROBE_ROUNDS = 300; // upper bound for probing rounds
+
+        function qs(sel, root=document) { return root.querySelector(sel); }
+        function qsa(sel, root=document) { return Array.from(root.querySelectorAll(sel)); }
+
+        function getQueryInt(name, defVal) {
+            const u = new URL(window.location.href);
+            const s = u.searchParams.get(name);
+            const v = parseInt(s || "");
+            return Number.isFinite(v) ? v : defVal;
+        }
+
+        function setQuery(name, value) {
+            const u = new URL(window.location.href);
+            u.searchParams.set(name, String(value));
+            window.history.replaceState({}, "", u.toString());
+        }
+
+        async function exists(url) {
+            try {
+                const res = await fetch(url, { method: "HEAD", cache: "no-store" });
+                return res.ok;
+            } catch (e) {
+                return false;
+            }
+        }
+
+        async function fetchJson(url) {
+            try {
+                const res = await fetch(url, { cache: "no-store" });
+                if (!res.ok) return null;
+                return await res.json();
+            } catch (e) {
+                return null;
+            }
+        }
+
+        async function fetchText(url) {
+            try {
+                const res = await fetch(url, { cache: "no-store" });
+                if (!res.ok) return null;
+                return await res.text();
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function inferDatasetLabel(path) {
+            const parts = path.split("/output/");
+            return parts.length > 1 ? parts[1] : path;
+        }
+
+        async function discoverRounds(root) {
+            const found = [];
+            // Probe sequentially for renders/{i}/render1.png
+            for (let i = 0; i <= MAX_PROBE_ROUNDS; i++) {
+                const url = `${root}/renders/${i}/render1.png`;
+                // eslint-disable-next-line no-await-in-loop
+                const ok = await exists(url);
+                if (ok) found.push(i);
+            }
+            return found;
+        }
+
+        function renderDatasets(activeIdx) {
+            const list = qs(".dataset-list");
+            list.innerHTML = "";
+            DATASETS.forEach((p, i) => {
+                const a = document.createElement("a");
+                a.className = `dataset${i === activeIdx ? " active" : ""}`;
+                a.href = `?dataset=${i+1}`;
+                a.textContent = inferDatasetLabel(p);
+                list.appendChild(a);
+            });
+        }
+
+        async function renderApp() {
+            const selectedIdx = Math.min(Math.max(getQueryInt("dataset", 1), 1), DATASETS.length) - 1;
+            renderDatasets(selectedIdx);
+            const root = DATASETS[selectedIdx];
+            qs(".title").textContent = `Dataset: ${inferDatasetLabel(root)}`;
+            setQuery("dataset", selectedIdx + 1);
+
+            // Generator summary
+            const gen = await fetchJson(`${root}/generator_thoughts.json`);
+            qs("#generator_json").textContent = gen ? JSON.stringify(gen, null, 2) : "(generator_thoughts.json not found)";
+
+            // Discover rounds and render thumbnails
+            const rounds = await discoverRounds(root);
+            const roundsGrid = qs(".rounds");
+            roundsGrid.innerHTML = "";
+            rounds.forEach((r) => {
+                const card = document.createElement("div");
+                card.className = "round";
+                card.innerHTML = `<img loading="lazy" src="${root}/renders/${r}/render1.png" alt="round ${r}"><div class="label">Round ${r}</div>`;
+                card.addEventListener("click", () => showRound(root, r));
+                roundsGrid.appendChild(card);
+            });
+
+            if (rounds.length > 0) {
+                showRound(root, rounds[rounds.length - 1]);
+            } else {
+                qs("#round_image").src = "";
+                qs("#round_image").alt = "No rounds found";
+                qs("#verifier_json").textContent = "";
+                qs("#script_text").textContent = "";
+            }
+        }
+
+        async function showRound(root, roundId) {
+            qs("#round_title").textContent = `Round ${roundId}`;
+            qs("#round_image").src = `${root}/renders/${roundId}/render1.png`;
+            qs("#round_image").alt = `Round ${roundId}`;
+
+            const vj = await fetchJson(`${root}/verifier_thoughts/${roundId}.json`);
+            qs("#verifier_json").textContent = vj ? JSON.stringify(vj, null, 2) : "(verifier json not found)";
+
+            const sc = await fetchText(`${root}/scripts/${roundId}.py`);
+            qs("#script_text").textContent = sc || "";
+
+            // Collect investigator images if exist
+            // Without server-side listing, we cannot reliably enumerate. We try a simple probe for common suffices.
+            const gallery = qs("#investigator_gallery");
+            gallery.innerHTML = "";
+            const exts = ["png", "jpg", "jpeg", "gif"];
+            for (let k = 0; k < 20; k++) {
+                for (const ext of exts) {
+                    const url = `${root}/verifier_thoughts/investigator/${roundId}_${k}.${ext}`;
+                    // eslint-disable-next-line no-await-in-loop
+                    if (await exists(url)) {
+                        const img = document.createElement("img");
+                        img.src = url;
+                        img.alt = `investigator ${roundId}_${k}`;
+                        img.style.maxWidth = "100%";
+                        img.style.border = "1px solid var(--border)";
+                        img.style.borderRadius = "6px";
+                        img.style.display = "block";
+                        img.style.background = "#0b0e18";
+                        img.loading = "lazy";
+                        const wrap = document.createElement("div");
+                        wrap.className = "imgwrap";
+                        wrap.appendChild(img);
+                        gallery.appendChild(wrap);
+                    }
+                }
+            }
+        }
+
+        window.addEventListener("DOMContentLoaded", renderApp);
+    </script>
+    <!-- Optional: favicon -->
+</head>
+<body>
+    <div class="layout">
+        <aside class="sidebar">
+            <h2>Datasets</h2>
+            <div class="dataset-list"></div>
+            <div style="margin: auto 12px 16px;" class="small muted">
+                Static viewer for GitHub Pages. Configure dataset paths in the HTML head.
+            </div>
+        </aside>
+        <div class="content">
+            <div class="topbar">
+                <div class="title"></div>
+            </div>
+            <div class="main">
+                <div class="panel">
+                    <h3>Rounds</h3>
+                    <div class="rounds"></div>
+                </div>
+                <div class="detail">
+                    <div class="section">
+                        <h4 id="round_title">Round</h4>
+                        <div class="imgwrap">
+                            <img id="round_image" alt="render" />
+                        </div>
+                    </div>
+                    <div class="section">
+                        <h4>Generator Summary (generator_thoughts.json)</h4>
+                        <pre id="generator_json"></pre>
+                    </div>
+                    <div class="section row">
+                        <div>
+                            <h4>Verifier JSON</h4>
+                            <pre id="verifier_json"></pre>
+                        </div>
+                        <div>
+                            <h4>Script</h4>
+                            <pre id="script_text"></pre>
+                        </div>
+                    </div>
+                    <div class="section">
+                        <h4>Investigator Images (best-effort)</h4>
+                        <div id="investigator_gallery" class="row"></div>
+                        <div class="note small" style="margin-top: 12px;">
+                            Without server-side directory listing, this page probes common filenames like <code>verifier_thoughts/investigator/{round}_{index}.png</code>. For full indexing, add a manifest JSON and change the JS to use it.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+<!--
+To host on GitHub Pages:
+1) Commit this file and your output folders to the repository.
+2) Enable Pages for the repository (Settings → Pages) and set the branch/folder.
+3) Visit https://<USER>.github.io/<REPO>/web/index.html
+4) Adjust DATASETS paths above to match where your outputs live in the repo.
+-->
+</html>
+
+

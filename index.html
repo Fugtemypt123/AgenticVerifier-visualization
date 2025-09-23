@@ -48,6 +48,16 @@
         a { color: var(--accent); }
         .small { font-size: 12px; }
         @media (max-width: 1200px) { .main { grid-template-columns: 1fr; } .panel { border-right: none; border-bottom: 1px solid var(--border); } }
+        /* Conversation message styles (adapted from web/templates/index.html) */
+        #generator_list { display: flex; flex-direction: column; gap: 12px; }
+        .msg { border: 1px solid var(--border); border-radius: 8px; background: #0b0e18; padding: 12px; }
+        .msg .meta { margin-bottom: 6px; color: var(--muted); font-size: 12px; }
+        .bubble { font-size: 14px; line-height: 1.5; color: var(--text); }
+        .bubble img { max-width: 100%; height: auto; display: block; margin: 6px 0; border-radius: 6px; }
+        .tool-calls { margin-top: 8px; border-top: 1px dashed var(--border); padding-top: 8px; }
+        .tool-calls > .title { font-weight: 600; font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+        .tool-call { border: 1px solid var(--border); border-radius: 6px; background: #0f1320; padding: 8px; margin-bottom: 8px; }
+        .tool-call .tool-head { font-weight: 600; font-size: 13px; color: var(--text); margin-bottom: 6px; }
     </style>
     <script>
         // Configure datasets here. Use paths relative to the repository root as served by GitHub Pages.
@@ -113,6 +123,176 @@
             return parts.length > 1 ? parts[1] : path;
         }
 
+        // ---- Conversation helpers (ported from web/templates/index.html, adapted for static) ----
+        function renderTextWithImages(text) {
+            if (!text) return '';
+            let html = text
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;');
+            html = html.replace(/!\[[^\]]*\]\(([^)]+)\)/g, (m, p1) => {
+                const src = p1.trim();
+                return '<img src="' + src + '" alt="image" />';
+            });
+            html = html.replace(/(\S+\.(?:png|jpg|jpeg|gif|webp))/gi, (m) => {
+                return '<img src="' + m + '" alt="image" />';
+            });
+            html = html.replace(/\n/g, '<br/>');
+            return html;
+        }
+
+        function tryParseJson(maybeJson) {
+            if (maybeJson == null) return null;
+            if (typeof maybeJson === 'object') return maybeJson;
+            if (typeof maybeJson !== 'string') return null;
+            try { return JSON.parse(maybeJson); } catch { return null; }
+        }
+
+        function normalizeImageUrl(imageUrl) {
+            if (!imageUrl) return null;
+            let url = imageUrl;
+            if (typeof imageUrl === 'object' && imageUrl.url) url = imageUrl.url;
+            if (!url) return null;
+            return url; // In static mode, assume paths are already relative to dataset root
+        }
+
+        function normalizeToolCalls(msg) {
+            const calls = [];
+            if (!msg) return calls;
+            if (Array.isArray(msg.tool_calls)) {
+                msg.tool_calls.forEach((tc) => {
+                    if (!tc) return;
+                    if (tc.function && (tc.function.name || tc.function.arguments != null)) {
+                        calls.push({ name: tc.function.name || 'function', id: tc.id || null, arguments: tc.function.arguments });
+                    } else if (tc.type && tc.name) {
+                        calls.push({ name: tc.name, id: tc.id || null, arguments: tc.arguments || tc.args || null });
+                    }
+                });
+            }
+            if (!calls.length && (msg.tool_call || msg.tool_name)) {
+                calls.push({ name: msg.tool_name || 'tool', id: msg.tool_call_id || null, arguments: msg.tool_call_arguments || msg.arguments || null });
+            }
+            return calls;
+        }
+
+        function renderToolCallsSection(msg) {
+            const calls = normalizeToolCalls(msg);
+            if (!calls.length) return null;
+            const wrapper = document.createElement('div');
+            wrapper.className = 'tool-calls';
+            const title = document.createElement('div');
+            title.className = 'title';
+            title.textContent = 'Tool calls';
+            wrapper.appendChild(title);
+            calls.forEach((call) => {
+                const item = document.createElement('div');
+                item.className = 'tool-call';
+                const head = document.createElement('div');
+                head.className = 'tool-head';
+                const label = call.name ? call.name : 'tool';
+                head.textContent = label + (call.id ? ('  [' + call.id + ']') : '');
+                item.appendChild(head);
+                const pre = document.createElement('pre');
+                const parsed = tryParseJson(call.arguments);
+                try {
+                    pre.textContent = parsed != null ? JSON.stringify(parsed, null, 2) : String(call.arguments ?? '');
+                } catch {
+                    pre.textContent = String(call.arguments ?? '');
+                }
+                item.appendChild(pre);
+                wrapper.appendChild(item);
+            });
+            return wrapper;
+        }
+
+        function renderMessageContent(msg) {
+            const container = document.createElement('div');
+            container.className = 'bubble';
+            const content = msg && (msg.content || msg.text || msg.message);
+            if (Array.isArray(content)) {
+                content.forEach(part => {
+                    if (!part) return;
+                    if (part.type === 'text' || typeof part === 'string') {
+                        const div = document.createElement('div');
+                        div.innerHTML = renderTextWithImages(String(part.text || part));
+                        container.appendChild(div);
+                    } else if (part.type === 'image_url' || part.image_url) {
+                        const src = normalizeImageUrl(part.image_url || part.url);
+                        if (src) {
+                            const img = document.createElement('img');
+                            img.src = src;
+                            img.alt = 'image';
+                            img.style.maxWidth = '100%';
+                            container.appendChild(img);
+                        }
+                    }
+                });
+            } else if (content && typeof content === 'object') {
+                if (content.image_url || content.images) {
+                    const maybeUrls = [];
+                    if (content.image_url) maybeUrls.push(content.image_url);
+                    if (Array.isArray(content.images)) maybeUrls.push(...content.images);
+                    maybeUrls.forEach(u => {
+                        const src = normalizeImageUrl(u);
+                        if (src) {
+                            const img = document.createElement('img');
+                            img.src = src;
+                            img.alt = 'image';
+                            img.style.maxWidth = '100%';
+                            container.appendChild(img);
+                        }
+                    });
+                }
+                if (content.text) {
+                    const div = document.createElement('div');
+                    div.innerHTML = renderTextWithImages(String(content.text));
+                    container.appendChild(div);
+                }
+            } else {
+                const div = document.createElement('div');
+                div.innerHTML = renderTextWithImages(String(content || ''));
+                container.appendChild(div);
+            }
+            const role = msg && (msg.role || msg.speaker || msg.name);
+            if (role && String(role).toLowerCase() === 'assistant') {
+                const toolsEl = renderToolCallsSection(msg);
+                if (toolsEl) container.appendChild(toolsEl);
+            }
+            return container;
+        }
+
+        function tryGetMessages(generatorJson) {
+            if (!generatorJson) return [];
+            if (Array.isArray(generatorJson)) return generatorJson;
+            if (Array.isArray(generatorJson.messages)) return generatorJson.messages;
+            if (Array.isArray(generatorJson.conversation)) return generatorJson.conversation;
+            return [];
+        }
+
+        function renderGeneratorConversation(gen) {
+            const messages = tryGetMessages(gen);
+            const list = qs('#generator_list');
+            const fallback = qs('#generator_json');
+            list.innerHTML = '';
+            if (messages.length > 0) {
+                fallback.style.display = 'none';
+                messages.forEach((msg) => {
+                    const role = (msg && (msg.role || msg.speaker || msg.name)) || 'message';
+                    const item = document.createElement('div');
+                    item.className = 'msg';
+                    const header = document.createElement('div');
+                    header.className = 'meta';
+                    header.innerHTML = '<strong>' + role + '</strong>';
+                    item.appendChild(header);
+                    item.appendChild(renderMessageContent(msg));
+                    list.appendChild(item);
+                });
+            } else {
+                fallback.style.display = 'block';
+                try { fallback.textContent = JSON.stringify(gen, null, 2); } catch { fallback.textContent = '(no generator_thoughts.json)'; }
+            }
+        }
+
         async function discoverRounds(root) {
             const found = [];
             // Probe sequentially for renders/{i}/render1.png
@@ -144,9 +324,15 @@
             qs(".title").textContent = `Dataset: ${inferDatasetLabel(root)}`;
             setQuery("dataset", selectedIdx + 1);
 
-            // Generator summary
+            // Generator conversation (with fallback to raw JSON)
             const gen = await fetchJson(`${root}/generator_thoughts.json`);
-            qs("#generator_json").textContent = gen ? JSON.stringify(gen, null, 2) : "(generator_thoughts.json not found)";
+            if (gen) {
+                renderGeneratorConversation(gen);
+            } else {
+                const pre = qs('#generator_json');
+                pre.style.display = 'block';
+                pre.textContent = '(generator_thoughts.json not found)';
+            }
 
             // Discover rounds and render thumbnails
             const rounds = await discoverRounds(root);
@@ -239,7 +425,8 @@
                         </div>
                     </div>
                     <div class="section">
-                        <h4>Generator Summary (generator_thoughts.json)</h4>
+                        <h4>Generator Thoughts (conversation)</h4>
+                        <div id="generator_list"></div>
                         <pre id="generator_json"></pre>
                     </div>
                     <div class="section row">

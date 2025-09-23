@@ -30,7 +30,7 @@
         .topbar { display: flex; gap: 12px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); }
         .title { font-size: 18px; font-weight: 600; }
         .muted { color: var(--muted); }
-        .main { display: grid; grid-template-columns: 380px 1fr; height: 100%; }
+        .main { display: grid; grid-template-columns: 1fr; height: 100%; }
         .panel { border-right: 1px solid var(--border); overflow: auto; }
         .panel h3 { font-size: 14px; margin: 16px; color: var(--muted); font-weight: 600; }
         .rounds { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; padding: 0 16px 24px; }
@@ -89,30 +89,11 @@
             window.history.replaceState({}, "", u.toString());
         }
 
-        async function exists(url) {
-            try {
-                const res = await fetch(url, { method: "HEAD", cache: "no-store" });
-                return res.ok;
-            } catch (e) {
-                return false;
-            }
-        }
-
         async function fetchJson(url) {
             try {
                 const res = await fetch(url, { cache: "no-store" });
                 if (!res.ok) return null;
                 return await res.json();
-            } catch (e) {
-                return null;
-            }
-        }
-
-        async function fetchText(url) {
-            try {
-                const res = await fetch(url, { cache: "no-store" });
-                if (!res.ok) return null;
-                return await res.text();
             } catch (e) {
                 return null;
             }
@@ -293,18 +274,6 @@
             }
         }
 
-        async function discoverRounds(root) {
-            const found = [];
-            // Probe sequentially for renders/{i}/render1.png
-            for (let i = 0; i <= MAX_PROBE_ROUNDS; i++) {
-                const url = `${root}/renders/${i}/render1.png`;
-                // eslint-disable-next-line no-await-in-loop
-                const ok = await exists(url);
-                if (ok) found.push(i);
-            }
-            return found;
-        }
-
         function renderDatasets(activeIdx) {
             const list = qs(".dataset-list");
             list.innerHTML = "";
@@ -324,7 +293,7 @@
             qs(".title").textContent = `Dataset: ${inferDatasetLabel(root)}`;
             setQuery("dataset", selectedIdx + 1);
 
-            // Generator conversation (with fallback to raw JSON)
+            // Conversation (with fallback to raw JSON)
             const gen = await fetchJson(`${root}/generator_thoughts.json`);
             if (gen) {
                 renderGeneratorConversation(gen);
@@ -332,66 +301,6 @@
                 const pre = qs('#generator_json');
                 pre.style.display = 'block';
                 pre.textContent = '(generator_thoughts.json not found)';
-            }
-
-            // Discover rounds and render thumbnails
-            const rounds = await discoverRounds(root);
-            const roundsGrid = qs(".rounds");
-            roundsGrid.innerHTML = "";
-            rounds.forEach((r) => {
-                const card = document.createElement("div");
-                card.className = "round";
-                card.innerHTML = `<img loading="lazy" src="${root}/renders/${r}/render1.png" alt="round ${r}"><div class="label">Round ${r}</div>`;
-                card.addEventListener("click", () => showRound(root, r));
-                roundsGrid.appendChild(card);
-            });
-
-            if (rounds.length > 0) {
-                showRound(root, rounds[rounds.length - 1]);
-            } else {
-                qs("#round_image").src = "";
-                qs("#round_image").alt = "No rounds found";
-                qs("#verifier_json").textContent = "";
-                qs("#script_text").textContent = "";
-            }
-        }
-
-        async function showRound(root, roundId) {
-            qs("#round_title").textContent = `Round ${roundId}`;
-            qs("#round_image").src = `${root}/renders/${roundId}/render1.png`;
-            qs("#round_image").alt = `Round ${roundId}`;
-
-            const vj = await fetchJson(`${root}/verifier_thoughts/${roundId}.json`);
-            qs("#verifier_json").textContent = vj ? JSON.stringify(vj, null, 2) : "(verifier json not found)";
-
-            const sc = await fetchText(`${root}/scripts/${roundId}.py`);
-            qs("#script_text").textContent = sc || "";
-
-            // Collect investigator images if exist
-            // Without server-side listing, we cannot reliably enumerate. We try a simple probe for common suffices.
-            const gallery = qs("#investigator_gallery");
-            gallery.innerHTML = "";
-            const exts = ["png", "jpg", "jpeg", "gif"];
-            for (let k = 0; k < 20; k++) {
-                for (const ext of exts) {
-                    const url = `${root}/verifier_thoughts/investigator/${roundId}_${k}.${ext}`;
-                    // eslint-disable-next-line no-await-in-loop
-                    if (await exists(url)) {
-                        const img = document.createElement("img");
-                        img.src = url;
-                        img.alt = `investigator ${roundId}_${k}`;
-                        img.style.maxWidth = "100%";
-                        img.style.border = "1px solid var(--border)";
-                        img.style.borderRadius = "6px";
-                        img.style.display = "block";
-                        img.style.background = "#0b0e18";
-                        img.loading = "lazy";
-                        const wrap = document.createElement("div");
-                        wrap.className = "imgwrap";
-                        wrap.appendChild(img);
-                        gallery.appendChild(wrap);
-                    }
-                }
             }
         }
 
@@ -413,38 +322,11 @@
                 <div class="title"></div>
             </div>
             <div class="main">
-                <div class="panel">
-                    <h3>Rounds</h3>
-                    <div class="rounds"></div>
-                </div>
                 <div class="detail">
                     <div class="section">
-                        <h4 id="round_title">Round</h4>
-                        <div class="imgwrap">
-                            <img id="round_image" alt="render" />
-                        </div>
-                    </div>
-                    <div class="section">
-                        <h4>Generator Thoughts (conversation)</h4>
+                        <h4>Conversation</h4>
                         <div id="generator_list"></div>
                         <pre id="generator_json"></pre>
-                    </div>
-                    <div class="section row">
-                        <div>
-                            <h4>Verifier JSON</h4>
-                            <pre id="verifier_json"></pre>
-                        </div>
-                        <div>
-                            <h4>Script</h4>
-                            <pre id="script_text"></pre>
-                        </div>
-                    </div>
-                    <div class="section">
-                        <h4>Investigator Images (best-effort)</h4>
-                        <div id="investigator_gallery" class="row"></div>
-                        <div class="note small" style="margin-top: 12px;">
-                            Without server-side directory listing, this page probes common filenames like <code>verifier_thoughts/investigator/{round}_{index}.png</code>. For full indexing, add a manifest JSON and change the JS to use it.
-                        </div>
                     </div>
                 </div>
             </div>

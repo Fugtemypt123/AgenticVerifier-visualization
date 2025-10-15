@@ -272,7 +272,7 @@
                 });
             } else {
                 fallback.style.display = 'block';
-                try { fallback.textContent = JSON.stringify(gen, null, 2); } catch { fallback.textContent = '(no generator_thoughts.json)'; }
+                try { fallback.textContent = JSON.stringify(gen, null, 2); } catch { fallback.textContent = '(no generator_memory.json)'; }
             }
         }
 
@@ -296,13 +296,13 @@
             setQuery("dataset", selectedIdx + 1);
 
             // Conversation (with fallback to raw JSON)
-            const gen = await fetchJson(`${root}/generator_thoughts.json`);
+            const gen = await fetchJson(`${root}/generator_memory.json`);
             if (gen) {
                 renderGeneratorConversation(gen);
             } else {
                 const pre = qs('#generator_json');
                 pre.style.display = 'block';
-                pre.textContent = '(generator_thoughts.json not found)';
+                pre.textContent = '(generator_memory.json not found)';
             }
         }
 

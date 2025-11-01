@@ -42,7 +42,27 @@
         .section h4 { margin: 0 0 10px; font-size: 14px; color: var(--muted); }
         .imgwrap { background: #0b0e18; border: 1px solid var(--border); border-radius: 8px; padding: 8px; }
         .imgwrap img { width: 100%; height: auto; display: block; }
-        pre, code { background: #0b0e18; color: #d7e1ff; border: 1px solid var(--border); border-radius: 8px; padding: 12px; overflow: auto; }
+        pre, code {
+            background: #0b0e18;
+            color: #d7e1ff;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 12px;
+            overflow: visible;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .msg.tool {
+            border-color: #ffb347;
+            box-shadow: 0 0 0 2px rgba(255, 179, 71, 0.25) inset;
+            background: rgba(255, 179, 71, 0.08);
+        }
+        .msg.tool .meta {
+            color: #ffd399;
+        }
+        .msg.tool .meta strong {
+            color: #ffb347;
+        }
         .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
         .note { padding: 10px 12px; background: #0b0e18; border: 1px dashed var(--border); border-radius: 8px; color: var(--muted); }
         a { color: var(--accent); }
@@ -70,6 +90,7 @@
             //"data/fruit",
             "data/placement1",
             "data/placement2",
+            "data/placement3",
             // "output/blendergym/place_demo_1/placement1",
             // "output/blendergym/place_demo_2/placement1",
         ];
@@ -262,10 +283,11 @@
                 fallback.style.display = 'none';
                 messages.forEach((msg) => {
                     const role = (msg && (msg.role || msg.speaker || msg.name)) || 'message';
+                    const roleLower = String(role).toLowerCase();
                     const item = document.createElement('div');
-                    item.className = 'msg';
+                    item.className = 'msg' + (roleLower === 'tool' ? ' tool' : '');
                     const header = document.createElement('div');
-                    header.className = 'meta';
+                    header.className = 'meta' + (roleLower === 'tool' ? ' tool' : '');
                     header.innerHTML = '<strong>' + role + '</strong>';
                     item.appendChild(header);
                     item.appendChild(renderMessageContent(msg));
